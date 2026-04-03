@@ -11,6 +11,8 @@ permissions:
 jobs:
   update-count:
     runs-on: ubuntu-latest
+    # Skip runs triggered by the bot itself to prevent infinite loops
+    if: github.actor != 'github-actions[bot]'
 
     steps:
       - name: Checkout repository
@@ -33,5 +35,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add index.html
-          git diff --cached --quiet || git commit -m "chore: update Nodes Active count to $(grep -oP '(?<=nodes-active\">)\d+' index.html)"
+          if ! git diff --cached --quiet; then
+            COUNT_IN_FILE=$(sed -n 's/.*<span id="nodes-active">\([0-9]*\)<\/span>.*/\1/p' index.html)
+            git commit -m "chore: update Nodes Active count to ${COUNT_IN_FILE}"
+          fi
           git push
