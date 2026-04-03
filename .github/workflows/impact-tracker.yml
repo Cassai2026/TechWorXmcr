@@ -1,0 +1,106 @@
+# TechWorX Manchester — Impact Tracker
+# Copyright (C) 2026 TechWorX Manchester
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# This workflow automates the 1:10:1 Impact Tracker.
+# It runs daily, reads the current impact-data.json, applies the 1:10:1
+# multiplier to any new client entries, and commits the updated file back
+# to the repository.
+#
+# Trigger manually via: Actions → Impact Tracker → Run workflow
+
+name: Impact Tracker
+
+on:
+  schedule:
+    # Run at 06:00 UTC every day
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      new_clients:
+        description: 'Number of new clients to add (integer ≥ 0)'
+        required: false
+        default: '0'
+      dry_run:
+        description: 'Dry run — print updated JSON without committing'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  update-impact:
+    name: Update Impact Data
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Apply 1:10:1 multiplier and update impact-data.json
+        id: update
+        env:
+          NEW_CLIENTS: ${{ github.event.inputs.new_clients || '0' }}
+          DRY_RUN:     ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          node - <<'EOF'
+          const fs        = require('fs');
+          const path      = require('path');
+          const dataFile  = path.join(process.cwd(), 'impact-data.json');
+
+          const data       = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+          const newClients = parseInt(process.env.NEW_CLIENTS, 10) || 0;
+
+          // Apply 1:10:1 model
+          data.clients    = (data.clients || 0) + newClients;
+          data.kids       = data.clients * 10;
+          data.nodes      = data.clients * 1;
+          data.lastUpdated = new Date().toISOString();
+
+          const updated = JSON.stringify(data, null, 2) + '\n';
+
+          console.log('=== Updated impact-data.json ===');
+          console.log(updated);
+
+          if (process.env.DRY_RUN === 'true') {
+            console.log('[dry-run] No changes written.');
+            process.exit(0);
+          }
+
+          fs.writeFileSync(dataFile, updated, 'utf8');
+          console.log('[done] impact-data.json written.');
+          EOF
+
+      - name: Commit and push updated impact data
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          git config user.name  "impact-tracker[bot]"
+          git config user.email "impact-tracker[bot]@users.noreply.github.com"
+
+          git diff --quiet impact-data.json && {
+            echo "No changes to commit.";
+            exit 0;
+          }
+
+          git add impact-data.json
+          git commit -m "chore(impact): update 1:10:1 tracker [skip ci]"
+          git push
+
+      - name: Print summary
+        run: |
+          echo "## Impact Tracker Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat impact-data.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "_Last updated: $(date -u)_" >> "$GITHUB_STEP_SUMMARY"
